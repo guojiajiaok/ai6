@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>AI需求登记系统 | 校园智能体管理演示</title>
+    <!-- Element Plus 样式 & Vue 3 -->
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #f0f2f5;
+            font-family: 'Segoe UI', 'PingFang SC', Roboto, 'Helvetica Neue', sans-serif;
+            padding: 20px;
+        }
+        .app-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .login-wrapper {
+            max-width: 420px;
+            margin: 80px auto;
+        }
+        .glass-card {
+            border-radius: 20px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.05);
+            transition: all 0.2s;
+        }
+        .filter-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 24px;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .filter-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .ai-badge {
+            background: #eef2ff;
+            color: #1e40af;
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 20px;
+            display: inline-block;
+        }
+        .analysis-text {
+            max-width: 220px;
+            font-size: 12px;
+            color: #2c3e50;
+            background: #f8fafc;
+            padding: 6px 8px;
+            border-radius: 8px;
+            line-height: 1.4;
+            margin-top: 4px;
+            word-break: break-word;
+        }
+        .urgent-high { color: #f56c6c; font-weight: 600; }
+        .urgent-medium { color: #e6a23c; }
+        .urgent-low { color: #67c23a; }
+        .header-user {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .api-key-panel {
+            margin-bottom: 16px;
+            background: #fef9e6;
+            border-left: 4px solid #ffb347;
+            padding: 8px 16px;
+            border-radius: 12px;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+<div id="app">
+    <!-- 登录界面 -->
+    <div v-if="!currentUser" class="login-wrapper">
+        <el-card class="glass-card" shadow="hover">
+            <template #header>
+                <div style="text-align: center; font-size: 22px; font-weight: 600;">
+                    🤖 AI需求登记系统
+                </div>
+                <div style="text-align: center; font-size: 13px; color: #909399; margin-top: 5px;">
+                    校园智能体需求管理平台
+                </div>
+            </template>
+            <el-form :model="loginForm" :rules="loginRules" ref="loginFormRef" label-width="0">
+                <el-form-item prop="username">
+                    <el-input 
+                        v-model="loginForm.username" 
+                        placeholder="用户名" 
+                        prefix-icon="User"
+                        size="large"
+                    ></el-input>
+                </el-form-item>
+                <el-form-item prop="password">
+                    <el-input 
+                        v-model="loginForm.password" 
+                        type="password" 
+                        placeholder="密码" 
+                        prefix-icon="Lock"
+                        size="large"
+                        show-password
+                    ></el-input>
+                </el-form-item>
+                <el-button type="primary" size="large" style="width: 100%;" @click="handleLogin" :loading="loginLoading">登 录</el-button>
+                <div style="margin-top: 20px; font-size: 12px; color: #aaa; text-align: center;">
+                    演示账号: admin / 123456 (管理员) &nbsp;&nbsp;|&nbsp;&nbsp; 张三 / 123456 (普通用户)
+                </div>
+            </el-form>
+        </el-card>
+    </div>
+
+    <!-- 主应用界面 -->
+    <div v-else class="app-container">
+        <!-- 头部卡片 -->
+        <el-card class="glass-card" style="margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <h2 style="font-weight: 600; margin: 0;">📋 AI需求登记与跟进系统</h2>
+                    <el-tag :type="currentUser.role === 'ADMIN' ? 'danger' : 'primary'" effect="dark" size="small">
+                        {{ currentUser.role === 'ADMIN' ? '系统管理员' : '需求提出方' }}
+                    </el-tag>
+                </div>
+                <div class="header-user">
+                    <span style="color: #606266;">👤 {{ currentUser.username }}</span>
+                    <el-button type="text" @click="logout" size="small" style="color: #f56c6c;">退出登录</el-button>
+                </div>
+            </div>
+            <!-- API Key 配置区 (用于真实大模型调用) -->
+            <div class="api-key-panel" v-if="showApiConfig">
+                <el-row :gutter="12" align="middle">
+                    <el-col :xs="24" :sm="16">
+                        <el-input 
+                            v-model="openaiApiKey" 
+                            placeholder="输入 OpenAI API Key (可选，留空则使用模拟AI评估)" 
+                            type="password" 
+                            show-password
+                            size="small"
+                            clearable>
+                            <template #prepend>🔑 API Key</template>
+                        </el-input>
+                    </el-col>
+                    <el-col :xs="24" :sm="8">
+                        <el-button size="small" type="info" plain @click="showApiConfig = false">收起</el-button>
+                        <el-button size="small" type="success" plain @click="testApiKey">测试连接(模拟)</el-button>
+                    </el-col>
+                </el-row>
+                <div style="font-size: 12px; margin-top: 8px; color: #e6a23c;">
+                    💡 提示：输入有效的 OpenAI Key 后将调用真实GPT模型分析需求；否则使用内置智能分析引擎(模拟)。
+                </div>
+            </div>
+            <div style="text-align: right; margin-top: 8px;">
+                <el-button text type="primary" size="small" @click="showApiConfig = !showApiConfig" v-if="!showApiConfig">
+                    ⚙️ 配置AI模型接口
+                </el-button>
+            </div>
+        </el-card>
+
+        <!-- 操作栏 + 筛选 -->
+        <el-card class="glass-card" style="margin-bottom: 20px;">
+            <div class="filter-bar">
+                <div class="filter-group">
+                    <el-select v-model="filters.department" placeholder="全部部门" clearable style="width: 130px" @change="loadDemands">
+                        <el-option v-for="dept in departmentOptions" :key="dept" :label="dept" :value="dept"></el-option>
+                    </el-select>
+                    <el-select v-model="filters.urgency" placeholder="紧急程度" clearable style="width: 120px" @change="loadDemands">
+                        <el-option label="🔥 高" value="HIGH"></el-option>
+                        <el-option label="⚡ 中" value="MEDIUM"></el-option>
+                        <el-option label="🍃 低" value="LOW"></el-option>
+                    </el-select>
+                    <el-select v-model="filters.status" placeholder="状态筛选" clearable style="width: 120px" @change="loadDemands">
+                        <el-option label="待评估" value="SUBMITTED"></el-option>
+                        <el-option label="已评估" value="EVALUATED"></el-option>
+                        <el-option label="已批准" value="APPROVED"></el-option>
+                        <el-option label="已拒绝" value="REJECTED"></el-option>
+                    </el-select>
+                </div>
+                <div>
+                    <el-button type="primary" @click="openCreateDialog" round>➕ 新增需求</el-button>
+                </div>
+            </div>
+
+            <!-- 需求列表表格 -->
+            <el-table :data="filteredDemands" stripe border style="width: 100%" v-loading="tableLoading">
+                <el-table-column prop="title" label="需求标题" min-width="180" show-overflow-tooltip></el-table-column>
+                <el-table-column prop="department" label="部门" width="110" align="center">
+                    <template #default="scope">
+                        <el-tag size="small" type="info">{{ scope.row.department }}</el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="urgency" label="紧急程度" width="100" align="center">
+                    <template #default="scope">
+                        <span :class="scope.row.urgency === 'HIGH' ? 'urgent-high' : (scope.row.urgency === 'MEDIUM' ? 'urgent-medium' : 'urgent-low')">
+                            {{ scope.row.urgency === 'HIGH' ? '高' : (scope.row.urgency === 'MEDIUM' ? '中' : '低') }}
+                        </span>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="status" label="状态" width="110" align="center">
+                    <template #default="scope">
+                        <el-tag :type="statusTagType(scope.row.status)" size="small">
+                            {{ statusText(scope.row.status) }}
+                        </el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="description" label="需求描述" min-width="200" show-overflow-tooltip></el-table-column>
+                <el-table-column prop="aiAnalysis" label="AI初步分析" width="230">
+                    <template #default="scope">
+                        <div v-if="scope.row.aiAnalysis" class="analysis-text">
+                            💡 {{ scope.row.aiAnalysis.length > 60 ? scope.row.aiAnalysis.slice(0, 60) + '…' : scope.row.aiAnalysis }}
+                        </div>
+                        <div v-else style="color: #c0c4cc; font-size: 12px;">暂未评估</div>
+                    </template>
+                </el-table-column>
+                <el-table-column label="操作" width="280" fixed="right" align="center">
+                    <template #default="scope">
+                        <el-button size="small" type="primary" plain @click="editDemand(scope.row)">编辑</el-button>
+                        <el-button size="small" type="success" plain @click="aiEvaluate(scope.row)" :loading="aiEvalLoading[scope.row.id]">🤖 AI评估</el-button>
+                        <el-button size="small" type="danger" plain @click="deleteDemand(scope.row)">删除</el-button>
+                    </template>
+                </el-table-column>
+            </el-table>
+            <div style="margin-top: 12px; text-align: right; font-size: 12px; color: #909399;">
+                共 {{ filteredDemands.length }} 条需求
+            </div>
+        </el-card>
+    </div>
+
+    <!-- 新增/编辑弹窗 -->
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="55%" destroy-on-close>
+        <el-form :model="demandForm" :rules="formRules" ref="demandFormRef" label-width="100px">
+            <el-form-item label="需求标题" prop="title">
+                <el-input v-model="demandForm.title" placeholder="请输入需求标题，如：智能排课助手"></el-input>
+            </el-form-item>
+            <el-form-item label="详细描述" prop="description">
+                <el-input type="textarea" v-model="demandForm.description" rows="4" placeholder="描述业务场景、痛点、期望效果..."></el-input>
+            </el-form-item>
+            <el-form-item label="所属部门" prop="department">
+                <el-select v-model="demandForm.department" placeholder="选择部门">
+                    <el-option label="教务处" value="教务处"></el-option>
+                    <el-option label="科研处" value="科研处"></el-option>
+                    <el-option label="后勤处" value="后勤处"></el-option>
+                    <el-option label="学生处" value="学生处"></el-option>
+                    <el-option label="信息中心" value="信息中心"></el-option>
+                </el-select>
+            </el-form-item>
+            <el-form-item label="紧急程度" prop="urgency">
+                <el-radio-group v-model="demandForm.urgency">
+                    <el-radio label="HIGH">高 🔥</el-radio>
+                    <el-radio label="MEDIUM">中 ⚡</el-radio>
+                    <el-radio label="LOW">低 🍃</el-radio>
+                </el-radio-group>
+            </el-form-item>
+            <el-form-item label="状态流转" prop="status" v-if="demandForm.id">
+                <el-select v-model="demandForm.status" placeholder="变更需求状态">
+                    <el-option label="待评估" value="SUBMITTED"></el-option>
+                    <el-option label="已评估" value="EVALUATED"></el-option>
+                    <el-option label="已批准" value="APPROVED"></el-option>
+                    <el-option label="已拒绝" value="REJECTED"></el-option>
+                </el-select>
+                <div style="font-size: 12px; color: #aaa; margin-top: 4px;">支持需求生命周期流转 (加分项)</div>
+            </el-form-item>
+        </el-form>
+        <template #footer>
+            <span class="dialog-footer">
+                <el-button @click="dialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="submitDemand" :loading="submitLoading">保存需求</el-button>
+            </span>
+        </template>
+    </el-dialog>
+</div>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<script src="https://unpkg.com/element-plus"></script>
+<script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+<script>
+    const { createApp, ref, reactive, computed, onMounted, nextTick } = Vue;
+
+    createApp({
+        setup() {
+            // ---------- 用户 & 权限 ----------
+            const currentUser = ref(null);
+            const users = reactive([
+                { id: 1, username: 'admin', password: '123456', role: 'ADMIN' },
+                { id: 2, username: '张三', password: '123456', role: 'USER' },
+                { id: 3, username: '李四', password: '123456', role: 'USER' }
+            ]);
+            // ---------- 数据 (localStorage) ----------
+            const demands = ref([]);
+            const filters = reactive({ department: '', urgency: '', status: '' });
+            const tableLoading = ref(false);
+            const aiEvalLoading = reactive({});
+            
+            // 弹窗相关
+            const dialogVisible = ref(false);
+            const dialogTitle = ref('新增需求');
+            const demandForm = reactive({ id: null, title: '', description: '', department: '教务处', urgency: 'MEDIUM', status: 'SUBMITTED' });
+            const demandFormRef = ref(null);
+            const submitLoading = ref(false);
+            const loginForm = reactive({ username: '', password: '' });
+            const loginLoading = ref(false);
+            const loginFormRef = ref(null);
+            
+            // AI配置
+            const openaiApiKey = ref(localStorage.getItem('ai_api_key') || '');
+            const showApiConfig = ref(false);
+            
+            // 部门选项 (动态扩展)
+            const departmentOptions = computed(() => {
+                const deps = new Set(demands.value.map(d => d.department).filter(Boolean));
+                return ['教务处', '科研处', '后勤处', '学生处', '信息中心', ...Array.from(deps)];
+            });
+            
+            // 表单校验规则
+            const formRules = {
+                title: [{ required: true, message: '请输入需求标题', trigger: 'blur' }],
+                description: [{ required: true, message: '请填写需求描述', trigger: 'blur' }],
+                department: [{ required: true, message: '请选择部门', trigger: 'change' }],
+                urgency: [{ required: true, message: '请选择紧急程度', trigger: 'change' }]
+            };
+            const loginRules = {
+                username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+                password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+            };
+            
+            // 辅助函数: 加载localStorage数据
+            const loadDemandsFromStorage = () => {
+                const stored = localStorage.getItem('ai_demand_system');
+                if (stored) {
+                    demands.value = JSON.parse(stored);
+                } else {
+                    // 初始化演示数据
+                    const initData = [
+                        { id: 1001, title: '智能排课冲突检测助手', description: '自动分析教室/教师/课程冲突，推荐最优排课方案', department: '教务处', urgency: 'HIGH', status: 'EVALUATED', createUserId: 2, createTime: new Date().toISOString(), aiAnalysis: 'AI初评：数据基础较好，可行性高，建议优先开发。' },
+                        { id: 1002, title: '科研项目智能匹配系统', description: '根据教师研究方向匹配校外合作课题', department: '科研处', urgency: 'MEDIUM', status: 'SUBMITTED', createUserId: 2, createTime: new Date().toISOString(), aiAnalysis: '' },
+                        { id: 1003, title: '校园报修智能分拨', description: '自动识别报修类型并分派维修人员', department: '后勤处', urgency: 'HIGH', status: 'SUBMITTED', createUserId: 3, createTime: new Date().toISOString(), aiAnalysis: '' },
+                        { id: 1004, title: '学生心理咨询智能预约', description: '智能推荐咨询师 + 情绪分析', department: '学生处', urgency: 'LOW', status: 'APPROVED', createUserId: 3, createTime: new Date().toISOString(), aiAnalysis: 'AI评估：具备可行性，需注意隐私保护。' }
+                    ];
+                    demands.value = initData;
+                    saveDemandsToStorage();
+                }
+            };
+            const saveDemandsToStorage = () => {
+                localStorage.setItem('ai_demand_system', JSON.stringify(demands.value));
+            };
+            
+            // 根据权限和筛选过滤需求
+            const filteredDemands = computed(() => {
+                let result = [...demands.value];
+                // 权限过滤: admin全可见，普通用户只看自己提交的
+                if (currentUser.value && currentUser.value.role !== 'ADMIN') {
+                    result = result.filter(d => d.createUserId === currentUser.value.id);
+                }
+                // 部门筛选
+                if (filters.department) {
+                    result = result.filter(d => d.department === filters.department);
+                }
+                // 紧急程度
+                if (filters.urgency) {
+                    result = result.filter(d => d.urgency === filters.urgency);
+                }
+                // 状态筛选
+                if (filters.status) {
+                    result = result.filter(d => d.status === filters.status);
+                }
+                // 按创建时间倒序
+                return result.sort((a,b) => new Date(b.createTime) - new Date(a.createTime));
+            });
+            
+            const loadDemands = () => {
+                tableLoading.value = true;
+                setTimeout(() => {
+                    loadDemandsFromStorage();
+                    tableLoading.value = false;
+                }, 100);
+            };
+            
+            // 状态映射
+            const statusText = (status) => {
+                const map = { SUBMITTED: '待评估', EVALUATED: '已评估', APPROVED: '已批准', REJECTED: '已拒绝' };
+                return map[status] || '未知';
+            };
+            const statusTagType = (status) => {
+                const map = { SUBMITTED: 'warning', EVALUATED: 'success', APPROVED: 'primary', REJECTED: 'danger' };
+                return map[status] || 'info';
+            };
+            
+            // 新增/编辑 逻辑
+            const openCreateDialog = () => {
+                dialogTitle.value = '新增需求';
+                Object.assign(demandForm, { id: null, title: '', description: '', department: '教务处', urgency: 'MEDIUM', status: 'SUBMITTED' });
+                dialogVisible.value = true;
+                nextTick(() => demandFormRef.value?.clearValidate());
+            };
+            const editDemand = (row) => {
+                dialogTitle.value = '编辑需求';
+                Object.assign(demandForm, {
+                    id: row.id, title: row.title, description: row.description, department: row.department,
+                    urgency: row.urgency, status: row.status
+                });
+                dialogVisible.value = true;
+                nextTick(() => demandFormRef.value?.clearValidate());
+            };
+            const submitDemand = async () => {
+                if (!demandFormRef.value) return;
+                await demandFormRef.value.validate((valid) => {
+                    if (valid) {
+                        submitLoading.value = true;
+                        if (demandForm.id) {
+                            // 编辑
+                            const index = demands.value.findIndex(d => d.id === demandForm.id);
+                            if (index !== -1) {
+                                demands.value[index] = { ...demands.value[index], ...demandForm, updateTime: new Date().toISOString() };
+                                saveDemandsToStorage();
+                                ElMessage.success('需求更新成功');
+                            }
+                        } else {
+                            // 新增
+                            const newId = Date.now();
+                            const newDemand = {
+                                id: newId,
+                                title: demandForm.title,
+                                description: demandForm.description,
+                                department: demandForm.department,
+                                urgency: demandForm.urgency,
+                                status: demandForm.status || 'SUBMITTED',
+                                createUserId: currentUser.value.id,
+                                createTime: new Date().toISOString(),
+                                aiAnalysis: '',
+                                updateTime: new Date().toISOString()
+                            };
+                            demands.value.push(newDemand);
+                            saveDemandsToStorage();
+                            ElMessage.success('需求已登记，等待AI评估');
+                        }
+                        dialogVisible.value = false;
+                        loadDemands(); // 刷新列表
+                        submitLoading.value = false;
+                    }
+                });
+            };
+            
+            // 删除需求
+            const deleteDemand = (row) => {
+                ElMessageBox.confirm(`确定删除需求「${row.title}」吗？`, '删除确认', { type: 'warning' }).then(() => {
+                    const index = demands.value.findIndex(d => d.id === row.id);
+                    if (index !== -1) {
+                        demands.value.splice(index, 1);
+                        saveDemandsToStorage();
+                        loadDemands();
+                        ElMessage.success('删除成功');
+                    }
+                }).catch(() => {});
+            };
+            
+            // ---------- AI 评估模块 (支持真实大模型API) ----------
+            // 模拟AI分析 (内置智能fallback)
+            const mockAIAnalysis = (title, description) => {
+                const randomTips = [
+                    "该需求与校园数字化高度契合，建议优先梳理数据标准。",
+                    "业务逻辑清晰，可尝试低代码智能体快速验证。",
+                    "涉及多部门协作，需要重点设计接口规范。",
+                    "可行性较高，预期可节省人工工作量约40%。",
+                    "需要补充训练数据，建议先小范围试点。"
+                ];
+                const seed = (title.length + description.length) % randomTips.length;
+                return `[AI模拟分析] ${randomTips[seed]}  (无API Key，此为内置演示评估)`;
+            };
+            
+            // 真实调用 OpenAI 兼容 API (用户需提供key)
+            const callRealAI = async (title, description, apiKey) => {
+                const prompt = `你是一位资深AI解决方案架构师，请对以下校园内部AI需求进行快速评估（80字以内），包括技术可行性、预期价值和建议。
+需求标题：${title}
+需求描述：${description}
+请给出专业、简洁的初步分析：`;
+                const requestBody = {
+                    model: "gpt-3.5-turbo",
+                    messages: [{ role: "user", content: prompt }],
+                    temperature: 0.7,
+                    max_tokens: 200
+                };
+                try {
+                    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${apiKey}`
+                        },
+                        body: JSON.stringify(requestBody)
+                    });
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`API返回错误 ${response.status}: ${errorText}`);
+                    }
+                    const data = await response.json();
+                    const content = data.choices?.[0]?.message?.content;
+                    return content ? content.trim() : "AI未返回有效建议，请稍后重试。";
+                } catch (err) {
+                    console.error("调用大模型失败", err);
+                    throw new Error(`真实AI调用失败: ${err.message}`);
+                }
+            };
+            
+            const aiEvaluate = async (row) => {
+                // 设置loading状态
+                aiEvalLoading[row.id] = true;
+                try {
+                    let analysisResult = '';
+                    const hasApiKey = openaiApiKey.value && openaiApiKey.value.trim().length > 20;
+                    if (hasApiKey) {
+                        ElMessage.info('正在调用真实大模型API进行深度分析...');
+                        try {
+                            analysisResult = await callRealAI(row.title, row.description, openaiApiKey.value);
+                            ElMessage.success('大模型评估完成');
+                        } catch (apiErr) {
+                            console.warn(apiErr);
+                            analysisResult = mockAIAnalysis(row.title, row.description) + ` [真实API调用失败：${apiErr.message}]`;
+                            ElMessage.warning('API调用失败，使用内置模拟分析');
+                        }
+                    } else {
+                        analysisResult = mockAIAnalysis(row.title, row.description);
+                        ElMessage.info('未配置API Key，使用内置AI模拟评估(满足演示需要)');
+                    }
+                    // 更新需求
+                    const idx = demands.value.findIndex(d => d.id === row.id);
+                    if (idx !== -1) {
+                        demands.value[idx].aiAnalysis = analysisResult;
+                        demands.value[idx].status = 'EVALUATED';   // 流转状态 → 已评估
+                        demands.value[idx].updateTime = new Date().toISOString();
+                        saveDemandsToStorage();
+                        loadDemands(); // 刷新列表
+                    }
+                } catch (error) {
+                    ElMessage.error('评估过程出错，请重试');
+                } finally {
+                    aiEvalLoading[row.id] = false;
+                }
+            };
+            
+            // 保存API Key到localStorage
+            const testApiKey = () => {
+                if (openaiApiKey.value && openaiApiKey.value.trim().startsWith('sk-')) {
+                    localStorage.setItem('ai_api_key', openaiApiKey.value);
+                    ElMessage.success('API Key已保存，下次将使用真实模型调用');
+                } else {
+                    ElMessage.warning('未输入有效Key，将继续使用模拟分析');
+                }
+            };
+            
+            // 登录逻辑
+            const handleLogin = () => {
+                loginFormRef.value.validate(async (valid) => {
+                    if (valid) {
+                        loginLoading.value = true;
+                        setTimeout(() => {
+                            const found = users.find(u => u.username === loginForm.username && u.password === loginForm.password);
+                            if (found) {
+                                currentUser.value = { ...found };
+                                localStorage.setItem('current_user', JSON.stringify({ id: found.id, username: found.username, role: found.role }));
+                                loadDemands();
+                                ElMessage.success(`欢迎回来，${found.username}`);
+                                // 重置筛选
+                                filters.department = '';
+                                filters.urgency = '';
+                                filters.status = '';
+                            } else {
+                                ElMessage.error('用户名或密码错误');
+                            }
+                            loginLoading.value = false;
+                        }, 300);
+                    }
+                });
+            };
+            const logout = () => {
+                currentUser.value = null;
+                localStorage.removeItem('current_user');
+                ElMessage.info('已退出登录');
+            };
+            
+            // 初始化检查登录态
+            const initAuth = () => {
+                const storedUser = localStorage.getItem('current_user');
+                if (storedUser) {
+                    try {
+                        const user = JSON.parse(storedUser);
+                        if (users.find(u => u.id === user.id)) {
+                            currentUser.value = user;
+                            loadDemands();
+                        }
+                    } catch(e) {}
+                }
+                // 加载API Key记忆
+                const savedKey = localStorage.getItem('ai_api_key');
+                if (savedKey) openaiApiKey.value = savedKey;
+            };
+            
+            onMounted(() => {
+                initAuth();
+                // 监听localStorage变化外部无需处理
+                window.ElMessage = ElementPlus.ElMessage;
+                window.ElMessageBox = ElementPlus.ElMessageBox;
+            });
+            
+            return {
+                currentUser, loginForm, loginRules, loginFormRef, loginLoading, handleLogin, logout,
+                demands, filters, filteredDemands, tableLoading, departmentOptions,
+                dialogVisible, dialogTitle, demandForm, demandFormRef, formRules, submitLoading,
+                openCreateDialog, editDemand, submitDemand, deleteDemand, aiEvaluate, aiEvalLoading,
+                statusText, statusTagType, loadDemands,
+                openaiApiKey, showApiConfig, testApiKey
+            };
+        }
+    }).use(ElementPlus).mount('#app');
+</script>
+</body>
+</html>
